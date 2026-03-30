@@ -1,0 +1,88 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Unique identifier for the user" },
+        "email": { "type": "string", "format": "email", "description": "User's email address" },
+        "displayName": { "type": "string", "description": "User's display name" },
+        "photoURL": { "type": "string", "description": "User's profile photo URL" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the user account was created" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Client": {
+      "title": "Client",
+      "description": "CRM client information",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier for the client" },
+        "uid": { "type": "string", "description": "Owner's UID" },
+        "name": { "type": "string", "description": "Client's full name" },
+        "email": { "type": "string", "format": "email", "description": "Client's email address" },
+        "phone": { "type": "string", "description": "Client's phone number" },
+        "status": { "type": "string", "enum": ["lead", "proposta", "cliente", "perdido"], "description": "Sales pipeline status" },
+        "investmentGoal": { "type": "number", "description": "Client's investment goal amount" },
+        "lastContact": { "type": "string", "description": "Date of last contact" },
+        "notes": { "type": "string", "description": "Additional notes about the client" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the client was added" }
+      },
+      "required": ["id", "uid", "name", "status"]
+    },
+    "Contact": {
+      "title": "Contact",
+      "description": "General contact information",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier for the contact" },
+        "uid": { "type": "string", "description": "Owner's UID" },
+        "name": { "type": "string", "description": "Contact's full name" },
+        "email": { "type": "string", "format": "email", "description": "Contact's email address" },
+        "phone": { "type": "string", "description": "Contact's phone number" },
+        "category": { "type": "string", "description": "Category of the contact (e.g., Partner, Supplier, Lead)" },
+        "notes": { "type": "string", "description": "Additional notes" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the contact was added" }
+      },
+      "required": ["id", "uid", "name"]
+    },
+    "Simulation": {
+      "title": "Simulation",
+      "description": "Saved compound interest simulation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier for the simulation" },
+        "uid": { "type": "string", "description": "Owner's UID" },
+        "clientId": { "type": "string", "description": "Associated client ID (optional)" },
+        "name": { "type": "string", "description": "Simulation name" },
+        "initialInvestment": { "type": "number" },
+        "monthlyContribution": { "type": "number" },
+        "interestRate": { "type": "number" },
+        "rateType": { "type": "string", "enum": ["monthly", "annual"] },
+        "period": { "type": "number" },
+        "periodType": { "type": "string", "enum": ["months", "years"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "uid", "name", "initialInvestment", "interestRate", "period"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/clients/{clientId}": {
+      "schema": "Client",
+      "description": "CRM clients"
+    },
+    "/contacts/{contactId}": {
+      "schema": "Contact",
+      "description": "General contacts"
+    },
+    "/simulations/{simulationId}": {
+      "schema": "Simulation",
+      "description": "Saved simulations"
+    }
+  }
+}

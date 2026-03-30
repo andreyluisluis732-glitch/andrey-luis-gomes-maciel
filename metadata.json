@@ -1,0 +1,5 @@
+{
+  "name": "Calculadora de Juros Compostos",
+  "description": "Uma ferramenta moderna para calcular o crescimento de seus investimentos ao longo do tempo com juros compostos.",
+  "requestFramePermissions": []
+}
