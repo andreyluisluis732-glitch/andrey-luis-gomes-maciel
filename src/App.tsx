@@ -31,7 +31,6 @@ import {
   LogOut,
   LogIn,
   Plus,
-  Lock,
   Contact as ContactIcon
 } from 'lucide-react';
 import { 
@@ -57,7 +56,6 @@ import {
   onAuthStateChanged,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
-  updateProfile,
   collection,
   doc,
   setDoc,
@@ -67,8 +65,7 @@ import {
   onSnapshot,
   query,
   where,
-  orderBy,
-  sendPasswordResetEmail
+  orderBy
 } from './firebase';
 import { User } from 'firebase/auth';
 
@@ -199,7 +196,6 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
-  const [displayName, setDisplayName] = useState('');
 
   // Auth Listener
   useEffect(() => {
@@ -272,10 +268,7 @@ export default function App() {
     setIsAuthSubmitting(true);
     try {
       if (authMode === 'signup') {
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        if (displayName) {
-          await updateProfile(userCredential.user, { displayName });
-        }
+        await createUserWithEmailAndPassword(auth, email, password);
         setSuccessMessage('Conta criada com sucesso!');
       } else {
         await signInWithEmailAndPassword(auth, email, password);
@@ -290,20 +283,6 @@ export default function App() {
       setError(msg);
     } finally {
       setIsAuthSubmitting(false);
-    }
-  };
-
-  const handleResetPassword = async () => {
-    if (!email) {
-      setError('Por favor, insira seu e-mail primeiro.');
-      return;
-    }
-    try {
-      await sendPasswordResetEmail(auth, email);
-      setSuccessMessage('E-mail de redefinição de senha enviado!');
-    } catch (err: any) {
-      console.error(err);
-      setError('Erro ao enviar e-mail de redefinição.');
     }
   };
 
@@ -607,25 +586,6 @@ export default function App() {
           </div>
 
           <form onSubmit={handleEmailAuth} className="space-y-4 mb-6">
-            {authMode === 'signup' && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-              >
-                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Nome Completo</label>
-                <div className="relative">
-                  <UserPlus className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <input 
-                    type="text" 
-                    placeholder="Seu nome"
-                    value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
-                    className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-sm"
-                    required={authMode === 'signup'}
-                  />
-                </div>
-              </motion.div>
-            )}
             <div>
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">E-mail</label>
               <div className="relative">
@@ -641,20 +601,9 @@ export default function App() {
               </div>
             </div>
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">Senha</label>
-                {authMode === 'signin' && (
-                  <button 
-                    type="button"
-                    onClick={handleResetPassword}
-                    className="text-xs font-bold text-indigo-600 hover:underline"
-                  >
-                    Esqueceu a senha?
-                  </button>
-                )}
-              </div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Senha</label>
               <div className="relative">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <Clock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                 <input 
                   type="password" 
                   placeholder="••••••••"
@@ -674,8 +623,8 @@ export default function App() {
                 <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
               ) : (
                 <>
-                  {authMode === 'signin' ? <LogIn className="w-5 h-5" /> : <UserPlus className="w-5 h-5" />}
-                  {authMode === 'signin' ? 'Entrar' : 'Criar Conta'}
+                  <LogIn className="w-5 h-5" />
+                  {authMode === 'signin' ? 'Entrar' : 'Cadastrar'}
                 </>
               )}
             </button>
