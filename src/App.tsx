@@ -192,21 +192,22 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
               <AlertCircle className="w-8 h-8" />
             </div>
             <h2 className="text-2xl font-bold text-slate-800 mb-2">Ops! Algo deu errado.</h2>
-            <p className="text-slate-500 mb-6">
-              Ocorreu um erro inesperado na aplicação. Por favor, tente recarregar a página.
+            <p className="text-slate-500 mb-6 font-medium">
+              Ocorreu um erro inesperado. Por favor, tente recarregar ou verifique os detalhes abaixo.
             </p>
             <button 
               onClick={() => window.location.reload()}
-              className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
+              className="w-full py-4 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 mb-4"
             >
               <RefreshCcw className="w-4 h-4" />
               Recarregar Página
             </button>
-            {typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production' && (
-              <pre className="mt-6 p-4 bg-slate-900 text-slate-100 text-left text-xs rounded-xl overflow-auto max-h-40">
-                {String(error)}
+            <div className="text-left mt-6">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Detalhes do Erro</p>
+              <pre className="p-4 bg-slate-900 text-pink-400 text-[10px] rounded-xl overflow-auto max-h-40 font-mono leading-relaxed">
+                {error?.message || String(error) || 'Erro sem descrição'}
               </pre>
-            )}
+            </div>
           </div>
         </div>
       );
@@ -218,20 +219,20 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
 
 // Helper for consistent calculations
 const calculateSimulation = (
-  initialInvestment: number, 
-  monthlyContribution: number, 
-  interestRate: number, 
-  period: number, 
-  rateType: 'annual' | 'monthly', 
-  periodType: 'years' | 'months'
+  initialInvestment: number | string, 
+  monthlyContribution: number | string, 
+  interestRate: number | string, 
+  period: number | string, 
+  rateType: 'annual' | 'monthly' = 'annual', 
+  periodType: 'years' | 'months' = 'years'
 ) => {
   const data = [];
-  const numInitialInvestment = Number(initialInvestment) || 0;
-  const numMonthlyContribution = Number(monthlyContribution) || 0;
-  const numInterestRate = Number(interestRate) || 0;
-  const numPeriod = Number(period) || 0;
+  const numInitialInvestment = Math.max(0, Number(initialInvestment) || 0);
+  const numMonthlyContribution = Math.max(0, Number(monthlyContribution) || 0);
+  const numInterestRate = Math.max(0, Number(interestRate) || 0);
+  const numPeriod = Math.max(0, Number(period) || 0);
 
-  const totalMonths = periodType === 'years' ? numPeriod * 12 : numPeriod;
+  const totalMonths = Math.min(600, periodType === 'years' ? numPeriod * 12 : numPeriod);
   const monthlyRate = rateType === 'annual' 
     ? Math.pow(1 + numInterestRate / 100, 1 / 12) - 1 
     : numInterestRate / 100;
@@ -248,6 +249,10 @@ const calculateSimulation = (
     totalInterest: 0,
     interest: 0
   });
+
+  if (isNaN(monthlyRate) || !isFinite(monthlyRate)) {
+    return data;
+  }
 
   for (let i = 1; i <= totalMonths; i++) {
     const interest = currentAmount * monthlyRate;
@@ -697,31 +702,47 @@ function AppContent() {
   }, [initialInvestment, finalResult]);
 
   const dashboardStats = useMemo(() => {
-    const totalAumSimulated = savedSimulations.reduce((acc, sim) => {
-      const results = calculateSimulation(
-        sim.initialInvestment,
-        sim.monthlyContribution,
-        sim.interestRate,
-        sim.period,
-        sim.rateType,
-        sim.periodType
-      );
-      return acc + results[results.length - 1].totalAmount;
-    }, 0);
+    try {
+      const totalAumSimulated = (savedSimulations || []).reduce((acc, sim) => {
+        if (!sim) return acc;
+        const simResults = calculateSimulation(
+          sim.initialInvestment || 0,
+          sim.monthlyContribution || 0,
+          sim.interestRate || 0,
+          sim.period || 0,
+          sim.rateType || 'annual',
+          sim.periodType || 'years'
+        );
+        const lastResult = simResults[simResults.length - 1];
+        return acc + (lastResult?.totalAmount || 0);
+      }, 0);
 
-    const clientStatusCounts = clients.reduce((acc, c) => {
-      acc[c.status] = (acc[c.status] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
+      const clientStatusCounts = (clients || []).reduce((acc, c) => {
+        if (c && c.status) {
+          acc[c.status] = (acc[c.status] || 0) + 1;
+        }
+        return acc;
+      }, {} as Record<string, number>);
 
-    return {
-      totalAumSimulated,
-      simulationCount: savedSimulations.length,
-      clientCount: clients.length,
-      leadCount: clientStatusCounts['lead'] || 0,
-      opportunityCount: clientStatusCounts['proposta'] || 0,
-      activeClients: clientStatusCounts['cliente'] || 0
-    };
+      return {
+        totalAumSimulated,
+        simulationCount: savedSimulations?.length || 0,
+        clientCount: clients?.length || 0,
+        leadCount: clientStatusCounts['lead'] || 0,
+        opportunityCount: clientStatusCounts['proposta'] || 0,
+        activeClients: clientStatusCounts['cliente'] || 0
+      };
+    } catch (err) {
+      console.error('Error calculating dashboard stats:', err);
+      return {
+        totalAumSimulated: 0,
+        simulationCount: 0,
+        clientCount: 0,
+        leadCount: 0,
+        opportunityCount: 0,
+        activeClients: 0
+      };
+    }
   }, [savedSimulations, clients]);
 
   if (isAuthLoading) {
