@@ -118,7 +118,7 @@ service cloud.firestore {
              (!('monthlyContribution' in data) || (data.monthlyContribution is number && data.monthlyContribution >= 0)) &&
              data.interestRate is number && data.interestRate >= 0 &&
              data.rateType in ['monthly', 'annual'] &&
-             data.period is number && data.period > 0 &&
+             data.period is number && data.period >= 0 &&
              data.periodType in ['months', 'years'];
     }
 

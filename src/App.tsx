@@ -15,6 +15,9 @@ import {
   BarChart as BarChartIcon,
   ChevronRight,
   Info,
+  Info as InfoIcon,
+  GraduationCap,
+  Users2,
   ArrowRight,
   Users,
   UserPlus,
@@ -67,6 +70,7 @@ import {
   where,
   orderBy
 } from './firebase';
+import firebaseConfig from '../firebase-applet-config.json';
 import { User } from 'firebase/auth';
 
 // Error Handling Spec for Firestore Operations
@@ -160,9 +164,13 @@ interface ContactData {
 }
 
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: any }> {
+  public state: { hasError: boolean, error: any };
+  public props: { children: React.ReactNode };
+
   constructor(props: { children: React.ReactNode }) {
     super(props);
     this.state = { hasError: false, error: null };
+    this.props = props;
   }
 
   static getDerivedStateFromError(error: any) {
@@ -207,10 +215,71 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
   }
 }
 
+// Helper for consistent calculations
+const calculateSimulation = (
+  initialInvestment: number, 
+  monthlyContribution: number, 
+  interestRate: number, 
+  period: number, 
+  rateType: 'annual' | 'monthly', 
+  periodType: 'years' | 'months'
+) => {
+  const data = [];
+  const numInitialInvestment = Number(initialInvestment) || 0;
+  const numMonthlyContribution = Number(monthlyContribution) || 0;
+  const numInterestRate = Number(interestRate) || 0;
+  const numPeriod = Number(period) || 0;
+
+  const totalMonths = periodType === 'years' ? numPeriod * 12 : numPeriod;
+  const monthlyRate = rateType === 'annual' 
+    ? Math.pow(1 + numInterestRate / 100, 1 / 12) - 1 
+    : numInterestRate / 100;
+
+  let currentAmount = numInitialInvestment;
+  let totalInvested = numInitialInvestment;
+  let totalInterest = 0;
+
+  data.push({
+    month: 0,
+    year: 0,
+    totalAmount: currentAmount,
+    totalInvested: totalInvested,
+    totalInterest: 0,
+    interest: 0
+  });
+
+  for (let i = 1; i <= totalMonths; i++) {
+    const interest = currentAmount * monthlyRate;
+    currentAmount += interest;
+    totalInterest += interest;
+
+    currentAmount += numMonthlyContribution;
+    totalInvested += numMonthlyContribution;
+
+    data.push({
+      month: i,
+      year: Math.floor(i / 12),
+      totalAmount: currentAmount,
+      totalInvested: totalInvested,
+      totalInterest: totalInterest,
+      interest: interest
+    });
+  }
+
+  return data;
+};
+
+const getGreeting = () => {
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour < 12) return 'Bom dia';
+  if (hour >= 12 && hour < 18) return 'Boa tarde';
+  return 'Boa noite';
+};
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'simulador' | 'crm' | 'contatos' | 'educacao' | 'sobre'>('simulador');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'simulador' | 'crm' | 'contatos' | 'educacao' | 'sobre'>('dashboard');
   const [simulationName, setSimulationName] = useState<string>('');
   const [selectedClientId, setSelectedClientId] = useState<string>('');
   const [initialInvestment, setInitialInvestment] = useState<number | string>(1000);
@@ -255,13 +324,22 @@ export default function App() {
       if (currentUser) {
         // Create/Update user profile in Firestore
         const userRef = doc(db, 'users', currentUser.uid);
-        setDoc(userRef, {
+        const userData: any = {
           uid: currentUser.uid,
-          email: currentUser.email,
-          displayName: currentUser.displayName,
-          photoURL: currentUser.photoURL,
-          createdAt: new Date().toISOString()
-        }, { merge: true }).catch(err => handleFirestoreError(err, OperationType.WRITE, `users/${currentUser.uid}`));
+          email: currentUser.email
+        };
+        
+        // Sanitize: only add fields if they are not null/undefined to avoid Firestore rule rejections
+        // Note: Rules don't explicitly check createdAt, but it's good practice to keep it clean.
+        if (currentUser.displayName) userData.displayName = currentUser.displayName;
+        if (currentUser.photoURL && (currentUser.photoURL.startsWith('http://') || currentUser.photoURL.startsWith('https://'))) {
+          userData.photoURL = currentUser.photoURL;
+        }
+
+        setDoc(userRef, userData, { merge: true }).catch(err => {
+          console.error('Failed to sync user profile:', err);
+          // Don't throw here to avoid crashing the app if just a profile sync fails
+        });
       }
     });
     return () => unsubscribe();
@@ -302,14 +380,26 @@ export default function App() {
 
   const handleLogin = async () => {
     try {
+      setError(null);
       await signInWithPopup(auth, googleProvider);
-    } catch (err) {
-      setError('Falha ao entrar com o Google. Tente novamente.');
+    } catch (err: any) {
+      console.error('Login error:', err);
+      if (err.code === 'auth/popup-closed-by-user') {
+        setError('O login foi cancelado (janela fechada).');
+      } else if (err.code === 'auth/popup-blocked') {
+        setError('O pop-up de login foi bloqueado pelo seu navegador.');
+      } else if (err.code === 'auth/operation-not-allowed') {
+        setError(`O login com Google NÃO está ativado no Firebase para o projeto: ${firebaseConfig.projectId}. Verifique se você ativou o Google E selecionou um "E-mail de suporte" no console.`);
+      } else {
+        setError(`Falha ao entrar com Google: ${err.message || err.code || 'Erro desconhecido'}`);
+      }
     }
   };
 
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
+    
     if (!email || !password) {
       setError('Por favor, preencha todos os campos.');
       return;
@@ -325,12 +415,16 @@ export default function App() {
         setSuccessMessage('Bem-vindo de volta!');
       }
     } catch (err: any) {
-      console.error(err);
+      console.error('Auth error:', err);
       let msg = 'Erro na autenticação.';
       if (err.code === 'auth/email-already-in-use') msg = 'Este e-mail já está em uso.';
       if (err.code === 'auth/invalid-credential') msg = 'E-mail ou senha incorretos.';
       if (err.code === 'auth/weak-password') msg = 'A senha deve ter pelo menos 6 caracteres.';
-      setError(msg);
+      if (err.code === 'auth/invalid-email') msg = 'E-mail inválido.';
+      if (err.code === 'auth/operation-not-allowed') msg = `O método de login por e-mail não está ativado no projeto: ${firebaseConfig.projectId}`;
+      if (err.code === 'auth/user-disabled') msg = 'Este usuário foi desativado.';
+      
+      setError(`${msg} (Código: ${err.code || 'unknown'})`);
     } finally {
       setIsAuthSubmitting(false);
     }
@@ -381,10 +475,10 @@ export default function App() {
       uid: user.uid,
       name: simulationName,
       clientId: selectedClientId || null,
-      initialInvestment,
-      monthlyContribution,
-      interestRate,
-      period,
+      initialInvestment: Number(initialInvestment),
+      monthlyContribution: Number(monthlyContribution),
+      interestRate: Number(interestRate),
+      period: Number(period),
       rateType,
       periodType,
       date: new Date().toLocaleDateString('pt-BR'),
@@ -539,54 +633,14 @@ export default function App() {
   };
 
   const results = useMemo(() => {
-    const data = [];
-    const numInitialInvestment = Number(initialInvestment) || 0;
-    const numMonthlyContribution = Number(monthlyContribution) || 0;
-    const numInterestRate = Number(interestRate) || 0;
-    const numPeriod = Number(period) || 0;
-
-    const totalMonths = periodType === 'years' ? numPeriod * 12 : numPeriod;
-    
-    // Usando taxa efetiva para conversão de taxa anual para mensal
-    // (1 + i_anual) = (1 + i_mensal)^12 => i_mensal = (1 + i_anual)^(1/12) - 1
-    const monthlyRate = rateType === 'annual' 
-      ? Math.pow(1 + numInterestRate / 100, 1 / 12) - 1 
-      : numInterestRate / 100;
-
-    let currentAmount = numInitialInvestment;
-    let totalInvested = numInitialInvestment;
-    let totalInterest = 0;
-
-    // Mês 0: Apenas o investimento inicial
-    data.push({
-      month: 0,
-      year: 0,
-      totalAmount: currentAmount,
-      totalInvested: totalInvested,
-      totalInterest: 0,
-      interest: 0
-    });
-
-    for (let i = 1; i <= totalMonths; i++) {
-      // Aporte no início do mês (o aporte rende juros no próprio mês)
-      currentAmount += numMonthlyContribution;
-      totalInvested += numMonthlyContribution;
-      
-      const interest = currentAmount * monthlyRate;
-      currentAmount += interest;
-      totalInterest += interest;
-
-      data.push({
-        month: i,
-        year: Math.floor(i / 12),
-        totalAmount: currentAmount,
-        totalInvested: totalInvested,
-        totalInterest: totalInterest,
-        interest: interest
-      });
-    }
-
-    return data;
+    return calculateSimulation(
+      Number(initialInvestment),
+      Number(monthlyContribution),
+      Number(interestRate),
+      Number(period),
+      rateType,
+      periodType
+    );
   }, [initialInvestment, monthlyContribution, interestRate, period, rateType, periodType]);
 
   const filteredAndSortedSimulations = useMemo(() => {
@@ -602,7 +656,7 @@ export default function App() {
       });
   }, [savedSimulations, searchTerm, sortBy]);
 
-  const finalResult = results[results.length - 1];
+  const finalResult = results[results.length - 1] || { totalAmount: 0, totalInvested: 0, totalInterest: 0 };
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('pt-BR', {
@@ -615,11 +669,39 @@ export default function App() {
     const initial = Number(initialInvestment) || 0;
     const monthlyTotal = finalResult.totalInvested - initial;
     return [
-      { name: 'Investimento Inicial', value: initial, color: '#3b82f6' },
-      { name: 'Total de Aportes', value: monthlyTotal, color: '#60a5fa' },
+      { name: 'Investimento Inicial', value: initial, color: '#6366f1' },
+      { name: 'Total de Aportes', value: monthlyTotal, color: '#818cf8' },
       { name: 'Total em Juros', value: finalResult.totalInterest, color: '#10b981' },
     ];
   }, [initialInvestment, finalResult]);
+
+  const dashboardStats = useMemo(() => {
+    const totalAumSimulated = savedSimulations.reduce((acc, sim) => {
+      const results = calculateSimulation(
+        sim.initialInvestment,
+        sim.monthlyContribution,
+        sim.interestRate,
+        sim.period,
+        sim.rateType,
+        sim.periodType
+      );
+      return acc + results[results.length - 1].totalAmount;
+    }, 0);
+
+    const clientStatusCounts = clients.reduce((acc, c) => {
+      acc[c.status] = (acc[c.status] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    return {
+      totalAumSimulated,
+      simulationCount: savedSimulations.length,
+      clientCount: clients.length,
+      leadCount: clientStatusCounts['lead'] || 0,
+      opportunityCount: clientStatusCounts['proposta'] || 0,
+      activeClients: clientStatusCounts['cliente'] || 0
+    };
+  }, [savedSimulations, clients]);
 
   if (isAuthLoading) {
     return (
@@ -699,6 +781,20 @@ export default function App() {
             </button>
           </form>
 
+          <AnimatePresence>
+            {error && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="mb-6 p-3 bg-red-50 border border-red-100 rounded-xl flex items-center gap-3"
+              >
+                <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                <p className="text-xs text-red-600 font-medium">{error}</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <div className="relative mb-6">
             <div className="absolute inset-0 flex items-center">
               <div className="w-full border-t border-slate-100"></div>
@@ -740,39 +836,51 @@ export default function App() {
               <TrendingUp className="w-5 h-5 text-white" />
             </div>
             <h1 className="text-xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-violet-600">
-              JurosCompostos.io
+              CapitalCalc
             </h1>
           </div>
           <div className="hidden sm:flex items-center gap-8 text-sm font-medium text-slate-500 sm:ml-8">
             <div className="flex items-center gap-6">
               <button 
-                onClick={() => setActiveTab('simulador')}
-                className={`hover:text-indigo-600 transition-colors ${activeTab === 'simulador' ? 'text-indigo-600 font-bold' : ''}`}
+                onClick={() => setActiveTab('dashboard')}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all hover:bg-indigo-50 ${activeTab === 'dashboard' ? 'text-indigo-600 font-bold bg-indigo-50/50' : 'hover:text-indigo-600'}`}
               >
+                <LayoutDashboard className="w-4 h-4" />
+                Dashboard
+              </button>
+              <button 
+                onClick={() => setActiveTab('simulador')}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all hover:bg-indigo-50 ${activeTab === 'simulador' ? 'text-indigo-600 font-bold bg-indigo-50/50' : 'hover:text-indigo-600'}`}
+              >
+                <Calculator className="w-4 h-4" />
                 Simulador
               </button>
               <button 
                 onClick={() => setActiveTab('crm')}
-                className={`hover:text-indigo-600 transition-colors ${activeTab === 'crm' ? 'text-indigo-600 font-bold' : ''}`}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all hover:bg-indigo-50 ${activeTab === 'crm' ? 'text-indigo-600 font-bold bg-indigo-50/50' : 'hover:text-indigo-600'}`}
               >
+                <Users className="w-4 h-4" />
                 CRM
               </button>
               <button 
                 onClick={() => setActiveTab('contatos')}
-                className={`hover:text-indigo-600 transition-colors ${activeTab === 'contatos' ? 'text-indigo-600 font-bold' : ''}`}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all hover:bg-indigo-50 ${activeTab === 'contatos' ? 'text-indigo-600 font-bold bg-indigo-50/50' : 'hover:text-indigo-600'}`}
               >
+                <Users2 className="w-4 h-4" />
                 Contatos
               </button>
               <button 
                 onClick={() => setActiveTab('educacao')}
-                className={`hover:text-indigo-600 transition-colors ${activeTab === 'educacao' ? 'text-indigo-600 font-bold' : ''}`}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all hover:bg-indigo-50 ${activeTab === 'educacao' ? 'text-indigo-600 font-bold bg-indigo-50/50' : 'hover:text-indigo-600'}`}
               >
+                <GraduationCap className="w-4 h-4" />
                 Educação
               </button>
               <button 
                 onClick={() => setActiveTab('sobre')}
-                className={`hover:text-indigo-600 transition-colors ${activeTab === 'sobre' ? 'text-indigo-600 font-bold' : ''}`}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all hover:bg-indigo-50 ${activeTab === 'sobre' ? 'text-indigo-600 font-bold bg-indigo-50/50' : 'hover:text-indigo-600'}`}
               >
+                <Info className="w-4 h-4" />
                 Sobre
               </button>
             </div>
@@ -804,9 +912,9 @@ export default function App() {
       <nav className="sm:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 z-50 px-4 py-2">
         <div className="flex items-center justify-around">
           {[
+            { id: 'dashboard', label: 'Painel', icon: LayoutDashboard },
             { id: 'simulador', label: 'Simular', icon: Calculator },
             { id: 'crm', label: 'CRM', icon: Users },
-            { id: 'contatos', label: 'Contatos', icon: ContactIcon },
             { id: 'educacao', label: 'Aprender', icon: Info },
             { id: 'sobre', label: 'Sobre', icon: ArrowRight },
           ].map((item) => (
@@ -836,6 +944,211 @@ export default function App() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {activeTab === 'dashboard' && (
+          <div className="space-y-8">
+            <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
+                  {getGreeting()}, {user?.displayName?.split(' ')[0] || 'Investidor'}!
+                </h1>
+                <p className="text-slate-500 mt-1">Aqui está o resumo das suas operações e metas.</p>
+              </div>
+              <button 
+                onClick={() => setActiveTab('simulador')}
+                className="flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all hover:-translate-y-0.5"
+              >
+                <Plus className="w-5 h-5" />
+                Nova Simulação
+              </button>
+            </header>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-white p-8 rounded-[2rem] border border-slate-200 shadow-sm hover:shadow-md transition-all group"
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <div className="p-4 bg-indigo-50 text-indigo-600 rounded-2xl group-hover:bg-indigo-600 group-hover:text-white transition-all">
+                    <DollarSign className="w-6 h-6" />
+                  </div>
+                  <span className="text-[10px] font-bold text-emerald-500 bg-emerald-50 px-2.5 py-1 rounded-lg uppercase tracking-tight">+12.5%</span>
+                </div>
+                <h3 className="text-slate-400 text-xs font-bold uppercase tracking-widest">Patrimônio Gerido</h3>
+                <p className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">
+                  {formatCurrency(dashboardStats.totalAumSimulated)}
+                </p>
+              </motion.div>
+
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+                className="bg-white p-8 rounded-[2rem] border border-slate-200 shadow-sm hover:shadow-md transition-all group"
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <div className="p-4 bg-emerald-50 text-emerald-600 rounded-2xl group-hover:bg-emerald-600 group-hover:text-white transition-all">
+                    <Users className="w-6 h-6" />
+                  </div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{clients.length} Total</span>
+                </div>
+                <h3 className="text-slate-400 text-xs font-bold uppercase tracking-widest">Clientes Ativos</h3>
+                <p className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">{dashboardStats.activeClients}</p>
+              </motion.div>
+
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                className="bg-white p-8 rounded-[2rem] border border-slate-200 shadow-sm hover:shadow-md transition-all group"
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <div className="p-4 bg-amber-50 text-amber-600 rounded-2xl group-hover:bg-amber-600 group-hover:text-white transition-all">
+                    <Clock3 className="w-6 h-6" />
+                  </div>
+                  <span className="text-[10px] font-bold text-amber-500 bg-amber-50 px-2.5 py-1 rounded-lg uppercase tracking-tight">Pendente</span>
+                </div>
+                <h3 className="text-slate-400 text-xs font-bold uppercase tracking-widest">Leads em Proposta</h3>
+                <p className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">{dashboardStats.opportunityCount}</p>
+              </motion.div>
+
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 }}
+                className="bg-white p-8 rounded-[2rem] border border-slate-200 shadow-sm hover:shadow-md transition-all group"
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <div className="p-4 bg-indigo-100 text-indigo-700 rounded-2xl group-hover:bg-indigo-700 group-hover:text-white transition-all">
+                    <Calculator className="w-6 h-6" />
+                  </div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Cenários</span>
+                </div>
+                <h3 className="text-slate-400 text-xs font-bold uppercase tracking-widest">Total Simulado</h3>
+                <p className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">{dashboardStats.simulationCount}</p>
+              </motion.div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div className="lg:col-span-2 space-y-6">
+                <section className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
+                  <div className="flex items-center justify-between mb-8">
+                    <h2 className="text-xl font-bold text-slate-800">Crescimento Recente</h2>
+                    <div className="flex items-center gap-2">
+                      <span className="flex items-center gap-1 text-xs font-medium text-emerald-600">
+                        <div className="w-2 h-2 rounded-full bg-emerald-500" /> Juros
+                      </span>
+                      <span className="flex items-center gap-1 text-xs font-medium text-indigo-600">
+                        <div className="w-2 h-2 rounded-full bg-indigo-500" /> Aportes
+                      </span>
+                    </div>
+                  </div>
+                  <div className="h-[300px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={savedSimulations.slice(-5)}>
+                        <defs>
+                          <linearGradient id="colorAum" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#6366f1" stopOpacity={0.1}/>
+                            <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                        <YAxis hide />
+                        <Tooltip />
+                        <Area type="monotone" dataKey="initialInvestment" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorAum)" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </section>
+
+                <section className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                    <h2 className="font-bold text-slate-800">Últimas Simulações</h2>
+                    <button 
+                      onClick={() => setActiveTab('simulador')}
+                      className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1"
+                    >
+                      Ver todas <ArrowRight className="w-3 h-3" />
+                    </button>
+                  </div>
+                  <div className="divide-y divide-slate-100">
+                    {savedSimulations.slice(0, 4).map((sim) => (
+                      <div key={sim.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-all cursor-pointer" onClick={() => { setActiveTab('simulador'); loadSimulation(sim); }}>
+                        <div className="flex items-center gap-4">
+                          <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-500">
+                            <History className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-slate-800">{sim.name}</p>
+                            <p className="text-xs text-slate-500">{sim.date}</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-bold text-indigo-600">{formatCurrency(Number(sim.initialInvestment))}</p>
+                          <p className="text-[10px] text-slate-400 uppercase tracking-widest">{sim.period} {sim.periodType === 'years' ? 'anos' : 'meses'}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              </div>
+
+              <div className="space-y-6">
+                <section className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                  <h2 className="font-bold text-slate-800 mb-6">Status dos Clientes</h2>
+                  <div className="space-y-6">
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-xs font-bold uppercase tracking-wider text-slate-400">
+                        <span>Leads</span>
+                        <span>{Math.round((dashboardStats.leadCount / (clients.length || 1)) * 100)}%</span>
+                      </div>
+                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-blue-500" style={{ width: `${(dashboardStats.leadCount / (clients.length || 1)) * 100}%` }} />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-xs font-bold uppercase tracking-wider text-slate-400">
+                        <span>Propostas</span>
+                        <span>{Math.round((dashboardStats.opportunityCount / (clients.length || 1)) * 100)}%</span>
+                      </div>
+                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-amber-500" style={{ width: `${(dashboardStats.opportunityCount / (clients.length || 1)) * 100}%` }} />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-xs font-bold uppercase tracking-wider text-slate-400">
+                        <span>Convertidos</span>
+                        <span>{Math.round((dashboardStats.activeClients / (clients.length || 1)) * 100)}%</span>
+                      </div>
+                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-emerald-500" style={{ width: `${(dashboardStats.activeClients / (clients.length || 1)) * 100}%` }} />
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="bg-indigo-600 p-8 rounded-3xl text-white shadow-xl shadow-indigo-200 relative overflow-hidden">
+                  <div className="relative z-10">
+                    <TrendingUp className="w-8 h-8 mb-4 opacity-50" />
+                    <h3 className="text-xl font-bold mb-2">Meta Financeira</h3>
+                    <p className="text-indigo-100 text-sm mb-6 leading-relaxed">
+                      Continue simulando cenários para ajudar seus clientes a baterem suas metas de longo prazo.
+                    </p>
+                    <button 
+                      onClick={() => setActiveTab('crm')}
+                      className="w-full py-3 bg-white text-indigo-600 rounded-xl font-bold hover:bg-indigo-50 transition-all"
+                    >
+                      Acessar CRM
+                    </button>
+                  </div>
+                  <div className="absolute -bottom-8 -right-8 w-32 h-32 bg-indigo-500 rounded-full filter blur-3xl opacity-50" />
+                </section>
+              </div>
+            </div>
+          </div>
+        )}
 
         {activeTab === 'simulador' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -915,8 +1228,8 @@ export default function App() {
                 <div className="space-y-4">
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-slate-600">Investimento Inicial</label>
-                    <div className="relative">
-                      <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <div className="relative group">
+                      <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
                       <NumericFormat 
                         value={initialInvestment}
                         onValueChange={(values) => setInitialInvestment(values.value)}
@@ -924,15 +1237,15 @@ export default function App() {
                         decimalSeparator=","
                         prefix="R$ "
                         allowNegative={false}
-                        className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
+                        className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all shadow-sm group-hover:border-slate-300"
                       />
                     </div>
                   </div>
 
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-slate-600">Aporte Mensal</label>
-                    <div className="relative">
-                      <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <div className="relative group">
+                      <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
                       <NumericFormat 
                         value={monthlyContribution}
                         onValueChange={(values) => setMonthlyContribution(values.value)}
@@ -940,7 +1253,7 @@ export default function App() {
                         decimalSeparator=","
                         prefix="R$ "
                         allowNegative={false}
-                        className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
+                        className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all shadow-sm group-hover:border-slate-300"
                       />
                     </div>
                   </div>
@@ -953,7 +1266,7 @@ export default function App() {
                         onValueChange={(values) => setInterestRate(values.value)}
                         decimalSeparator=","
                         allowNegative={false}
-                        className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
+                        className="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all shadow-sm hover:border-slate-300"
                       />
                     </div>
                     <div className="space-y-2">
@@ -961,7 +1274,7 @@ export default function App() {
                       <select 
                         value={rateType}
                         onChange={(e) => setRateType(e.target.value as 'annual' | 'monthly')}
-                        className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all text-sm"
+                        className="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all shadow-sm appearance-none cursor-pointer hover:border-slate-300 text-sm"
                       >
                         <option value="annual">Anual</option>
                         <option value="monthly">Mensal</option>
@@ -976,7 +1289,7 @@ export default function App() {
                         value={period}
                         onValueChange={(values) => setPeriod(values.value)}
                         allowNegative={false}
-                        className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
+                        className="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all shadow-sm hover:border-slate-300"
                       />
                     </div>
                     <div className="space-y-2">
@@ -984,11 +1297,22 @@ export default function App() {
                       <select 
                         value={periodType}
                         onChange={(e) => setPeriodType(e.target.value as 'years' | 'months')}
-                        className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all text-sm"
+                        className="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all shadow-sm appearance-none cursor-pointer hover:border-slate-300 text-sm"
                       >
                         <option value="years">Anos</option>
                         <option value="months">Meses</option>
                       </select>
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-amber-50 p-4 rounded-2xl border border-amber-100 mt-6 shadow-inner ring-1 ring-inset ring-amber-500/5">
+                  <div className="flex gap-3">
+                    <Info className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-xs font-bold text-amber-800 uppercase tracking-tight">Metodologia Bancária</p>
+                      <p className="text-[10px] text-amber-700 leading-relaxed mt-1">
+                        Utilizamos a <strong>Taxa Equivalente Real</strong> para conversão anual/mensal e aportes <strong>Postecipados</strong> (ao final do mês). Este é o modelo exato usado por grandes bancos e corretoras.
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -1082,38 +1406,44 @@ export default function App() {
             {/* Results & Charts */}
             <div className="lg:col-span-8 space-y-8">
               {/* Summary Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <motion.div 
-                  whileHover={{ y: -4 }}
-                  className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 flex flex-col gap-2"
+                  whileHover={{ y: -6, shadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
+                  className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-200 flex flex-col gap-3 transition-all"
                 >
-                  <div className="flex items-center gap-2 text-slate-500 text-sm font-medium">
-                    <TrendingUp className="w-4 h-4 text-indigo-600" />
-                    Valor Total Final
+                  <div className="flex items-center gap-3 text-slate-500 text-xs font-bold uppercase tracking-widest">
+                    <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                      <TrendingUp className="w-4 h-4" />
+                    </div>
+                    Patrimônio Final
                   </div>
-                  <div className="text-2xl font-bold text-slate-900">{formatCurrency(finalResult.totalAmount)}</div>
+                  <div className="text-3xl font-extrabold text-slate-900 tracking-tight">{formatCurrency(finalResult.totalAmount)}</div>
                 </motion.div>
 
                 <motion.div 
-                  whileHover={{ y: -4 }}
-                  className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 flex flex-col gap-2"
+                  whileHover={{ y: -6, shadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
+                  className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-200 flex flex-col gap-3 transition-all"
                 >
-                  <div className="flex items-center gap-2 text-slate-500 text-sm font-medium">
-                    <DollarSign className="w-4 h-4 text-emerald-600" />
-                    Total Investido
+                  <div className="flex items-center gap-3 text-slate-500 text-xs font-bold uppercase tracking-widest">
+                    <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl">
+                      <DollarSign className="w-4 h-4" />
+                    </div>
+                    Investimento Total
                   </div>
-                  <div className="text-2xl font-bold text-slate-900">{formatCurrency(finalResult.totalInvested)}</div>
+                  <div className="text-3xl font-extrabold text-slate-900 tracking-tight">{formatCurrency(finalResult.totalInvested)}</div>
                 </motion.div>
 
                 <motion.div 
-                  whileHover={{ y: -4 }}
-                  className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 flex flex-col gap-2"
+                  whileHover={{ y: -6, shadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
+                  className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-200 flex flex-col gap-3 transition-all"
                 >
-                  <div className="flex items-center gap-2 text-slate-500 text-sm font-medium">
-                    <TrendingUp className="w-4 h-4 text-amber-600" />
-                    Total em Juros
+                  <div className="flex items-center gap-3 text-slate-500 text-xs font-bold uppercase tracking-widest">
+                    <div className="p-2 bg-amber-50 text-amber-600 rounded-xl">
+                      <TrendingUp className="w-4 h-4" />
+                    </div>
+                    Rendimento (Juros)
                   </div>
-                  <div className="text-2xl font-bold text-slate-900">{formatCurrency(finalResult.totalInterest)}</div>
+                  <div className="text-3xl font-extrabold text-indigo-600 tracking-tight">{formatCurrency(finalResult.totalInterest)}</div>
                 </motion.div>
               </div>
 
@@ -1712,12 +2042,16 @@ export default function App() {
               <div className="bg-indigo-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-indigo-200">
                 <TrendingUp className="w-8 h-8 text-white" />
               </div>
-              <h2 className="text-2xl font-bold text-slate-900">Sobre o JurosCompostos.io</h2>
+              <h2 className="text-2xl font-bold text-slate-900">Sobre o CapitalCalc</h2>
               <p className="text-slate-500 mt-4 leading-relaxed">
                 Nossa missão é democratizar o planejamento financeiro através de ferramentas simples, poderosas e gratuitas. 
                 Este simulador foi desenvolvido para ajudar você a visualizar o futuro do seu dinheiro.
               </p>
-              <div className="pt-8 mt-8 border-t border-slate-100 flex justify-center gap-8">
+              <div className="bg-indigo-50 p-4 rounded-2xl mb-8 mt-6">
+                <p className="text-xs font-bold text-indigo-600 uppercase tracking-widest mb-1">Versão 2.0</p>
+                <p className="text-sm text-indigo-700">Novo Dashboard, CRM integrado e interface otimizada.</p>
+              </div>
+              <div className="pt-8 border-t border-slate-100 flex justify-center gap-8">
                 <div>
                   <p className="text-2xl font-bold text-indigo-600">100%</p>
                   <p className="text-xs text-slate-400 uppercase font-bold">Gratuito</p>
@@ -1886,7 +2220,7 @@ export default function App() {
                       <input 
                         name="email" 
                         type="email" 
-                        required 
+                        placeholder="cliente@exemplo.com"
                         defaultValue={editingClient?.email}
                         className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                       />
@@ -1895,7 +2229,8 @@ export default function App() {
                       <label className="text-xs font-bold text-slate-400 uppercase">Telefone</label>
                       <input 
                         name="phone" 
-                        required 
+                        type="text"
+                        placeholder="(00) 00000-0000"
                         defaultValue={editingClient?.phone}
                         className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                       />

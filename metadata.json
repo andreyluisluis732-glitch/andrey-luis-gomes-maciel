@@ -1,5 +1,6 @@
 {
-  "name": "Calculadora de Juros Compostos",
+  "name": "CapitalCalc",
   "description": "Uma ferramenta moderna para calcular o crescimento de seus investimentos ao longo do tempo com juros compostos.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": []
 }
