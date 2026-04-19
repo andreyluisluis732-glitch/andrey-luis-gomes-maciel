@@ -2,116 +2,53 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     // ===============================================================
-    // Assumed Data Model
+    // Global Safety Net
     // ===============================================================
-    //
-    // Collection: users
-    // Document ID: {uid}
-    // Fields:
-    //   - uid: string (required) - User's unique ID
-    //   - email: string (required, email format) - User's email
-    //   - displayName: string (optional) - User's name
-    //   - photoURL: string (optional, url format) - User's photo
-    //   - createdAt: timestamp (optional) - Account creation date
-    //
-    // Collection: clients
-    // Document ID: {clientId}
-    // Fields:
-    //   - id: string (required) - Client's unique ID
-    //   - uid: string (required) - Owner's UID
-    //   - name: string (required, size 1-100) - Client's name
-    //   - email: string (optional, email format) - Client's email
-    //   - phone: string (optional) - Client's phone
-    //   - status: string (required, enum: lead, proposta, cliente, perdido) - Pipeline status
-    //   - investmentGoal: number (optional, positive) - Investment goal
-    //   - lastContact: string (optional) - Last contact date
-    //   - notes: string (optional, size 0-1000) - Additional notes
-    //   - createdAt: timestamp (optional) - Creation date
-    //
-    // Collection: simulations
-    // Document ID: {simulationId}
-    // Fields:
-    //   - id: string (required) - Simulation unique ID
-    //   - uid: string (required) - Owner's UID
-    //   - clientId: string (optional) - Associated client ID
-    //   - name: string (required, size 1-100) - Simulation name
-    //   - initialInvestment: number (required, positive) - Initial amount
-    //   - monthlyContribution: number (optional, positive) - Monthly amount
-    //   - interestRate: number (required, positive) - Rate
-    //   - rateType: string (required, enum: monthly, annual) - Rate type
-    //   - period: number (required, positive) - Period
-    //   - periodType: string (required, enum: months, years) - Period type
-    //   - createdAt: timestamp (optional) - Creation date
-    //
-    // Collection: contacts
-    // Document ID: {contactId}
-    // Fields:
-    //   - id: string (required) - Contact unique ID
-    //   - uid: string (required) - Owner's UID
-    //   - name: string (required, size 1-100) - Contact name
-    //   - email: string (optional, email format) - Contact email
-    //   - phone: string (optional) - Contact phone
-    //   - category: string (optional) - Category
-    //   - notes: string (optional, size 0-1000) - Additional notes
-    //   - createdAt: timestamp (optional) - Creation date
-    //
-    // ===============================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
 
     // ===============================================================
-    // Helper Functions
+    // Phase 3: Primitives & Helpers
     // ===============================================================
-    function isAuthenticated() {
-      return request.auth != null;
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function isResourceOwner() { return isSignedIn() && resource.data.uid == request.auth.uid; }
+    
+    function isValidId(id) { 
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
     }
-
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
-    }
-
-    function isDocOwner() {
-      return isAuthenticated() && request.auth.uid == resource.data.uid;
-    }
-
-    function uidUnchanged() {
-      return !('uid' in request.resource.data) || request.resource.data.uid == request.auth.uid;
-    }
-
-    function uidNotModified() {
-      return !('uid' in request.resource.data) || request.resource.data.uid == resource.data.uid;
-    }
-
+    
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    
     function isValidEmail(email) {
-      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
-    }
-
-    function isValidUrl(url) {
-      return url is string && (url.matches("^https://.*") || url.matches("^http://.*"));
-    }
-
-    function hasOnlyAllowedFields(fields) {
-      return request.resource.data.keys().hasOnly(fields);
+      return email is string && email.size() <= 256 && 
+             email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
     }
 
     // ===============================================================
-    // Domain Validators
+    // Validation Blueprints (Anti-Update-Gap)
     // ===============================================================
+    
     function isValidUser(data) {
       return data.uid == request.auth.uid &&
-             data.email is string && isValidEmail(data.email) &&
-             (!('displayName' in data) || (data.displayName is string && data.displayName.size() < 100)) &&
-             (!('photoURL' in data) || isValidUrl(data.photoURL));
+             isValidEmail(data.email) &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100)) &&
+             (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1024));
     }
 
     function isValidClient(data) {
       return data.uid == request.auth.uid &&
              data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
              (!('email' in data) || isValidEmail(data.email)) &&
+             (!('phone' in data) || (data.phone is string && data.phone.size() <= 32)) &&
              data.status in ['lead', 'proposta', 'cliente', 'perdido'] &&
              (!('investmentGoal' in data) || (data.investmentGoal is number && data.investmentGoal >= 0)) &&
-             (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000));
+             (!('notes' in data) || (data.notes is string && data.notes.size() <= 2000));
     }
 
-    function isValidSimulation(data) {
+    function isValidSimulation(data, db) {
       return data.uid == request.auth.uid &&
              data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
              data.initialInvestment is number && data.initialInvestment >= 0 &&
@@ -119,50 +56,66 @@ service cloud.firestore {
              data.interestRate is number && data.interestRate >= 0 &&
              data.rateType in ['monthly', 'annual'] &&
              data.period is number && data.period >= 0 &&
-             data.periodType in ['months', 'years'];
+             data.periodType in ['months', 'years'] &&
+             // Relational check: If clientId is provided, verify it exists and belongs to user
+             (!('clientId' in data) || (
+               data.clientId == null || (
+                 isValidId(data.clientId) && 
+                 get(/databases/$(db)/documents/clients/$(data.clientId)).data.uid == request.auth.uid
+               )
+             ));
     }
 
     function isValidContact(data) {
       return data.uid == request.auth.uid &&
              data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
              (!('email' in data) || isValidEmail(data.email)) &&
-             (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000));
+             (!('phone' in data) || (data.phone is string && data.phone.size() <= 32)) &&
+             (!('category' in data) || (data.category is string && data.category.size() <= 50)) &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() <= 2000));
     }
 
     // ===============================================================
-    // Rules
+    // Rules Matching Paths
     // ===============================================================
-    
-    // Default deny
-    match /{path=**} {
-      allow read, write: if false;
-    }
 
     match /users/{uid} {
-      allow read: if isOwner(uid);
-      allow create: if isOwner(uid) && isValidUser(request.resource.data);
-      allow update: if isOwner(uid) && isValidUser(request.resource.data) && uidNotModified();
+      allow get: if isOwner(uid);
+      allow create: if isOwner(uid) && isValidUser(incoming());
+      allow update: if isOwner(uid) && isValidUser(incoming()) && incoming().uid == existing().uid;
     }
 
     match /clients/{clientId} {
-      allow read: if isDocOwner();
-      allow create: if isAuthenticated() && isValidClient(request.resource.data) && uidUnchanged();
-      allow update: if isDocOwner() && isValidClient(request.resource.data) && uidNotModified();
-      allow delete: if isDocOwner();
+      allow get: if isResourceOwner();
+      allow list: if isSignedIn() && resource.data.uid == request.auth.uid;
+      
+      allow create: if isSignedIn() && isValidClient(incoming()) && isValidId(clientId);
+      allow update: if isResourceOwner() && isValidClient(incoming()) && 
+                    incoming().uid == existing().uid && 
+                    incoming().id == existing().id;
+      allow delete: if isResourceOwner();
     }
 
     match /simulations/{simulationId} {
-      allow read: if isDocOwner();
-      allow create: if isAuthenticated() && isValidSimulation(request.resource.data) && uidUnchanged();
-      allow update: if isDocOwner() && isValidSimulation(request.resource.data) && uidNotModified();
-      allow delete: if isDocOwner();
+      allow get: if isResourceOwner();
+      allow list: if isSignedIn() && resource.data.uid == request.auth.uid;
+      
+      allow create: if isSignedIn() && isValidSimulation(incoming(), database) && isValidId(simulationId);
+      allow update: if isResourceOwner() && isValidSimulation(incoming(), database) &&
+                    incoming().uid == existing().uid &&
+                    incoming().id == existing().id;
+      allow delete: if isResourceOwner();
     }
 
     match /contacts/{contactId} {
-      allow read: if isDocOwner();
-      allow create: if isAuthenticated() && isValidContact(request.resource.data) && uidUnchanged();
-      allow update: if isDocOwner() && isValidContact(request.resource.data) && uidNotModified();
-      allow delete: if isDocOwner();
+      allow get: if isResourceOwner();
+      allow list: if isSignedIn() && resource.data.uid == request.auth.uid;
+      
+      allow create: if isSignedIn() && isValidContact(incoming()) && isValidId(contactId);
+      allow update: if isResourceOwner() && isValidContact(incoming()) &&
+                    incoming().uid == existing().uid &&
+                    incoming().id == existing().id;
+      allow delete: if isResourceOwner();
     }
   }
 }
