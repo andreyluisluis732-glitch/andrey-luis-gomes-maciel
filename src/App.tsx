@@ -137,24 +137,74 @@ interface SavedSimulation {
 
 interface Client {
   id: string;
+  uid: string;
   name: string;
-  email: string;
-  phone: string;
+  email?: string;
+  phone?: string;
   status: 'lead' | 'proposta' | 'cliente' | 'perdido';
   investmentGoal: number;
-  notes: string;
+  notes?: string;
   lastContact: string;
   createdAt: string;
 }
 
 interface ContactData {
   id: string;
+  uid: string;
   name: string;
-  email: string;
-  phone: string;
-  category: string;
-  notes: string;
+  email?: string;
+  phone?: string;
+  category?: string;
+  notes?: string;
   createdAt: string;
+}
+
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: any }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: any, errorInfo: any) {
+    console.error("ErrorBoundary caught an error", error, errorInfo);
+  }
+
+  render() {
+    const { hasError, error } = this.state;
+    if (hasError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+          <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full border border-slate-200 text-center">
+            <div className="w-16 h-16 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <AlertCircle className="w-8 h-8" />
+            </div>
+            <h2 className="text-2xl font-bold text-slate-800 mb-2">Ops! Algo deu errado.</h2>
+            <p className="text-slate-500 mb-6">
+              Ocorreu um erro inesperado na aplicação. Por favor, tente recarregar a página.
+            </p>
+            <button 
+              onClick={() => window.location.reload()}
+              className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
+            >
+              <RefreshCcw className="w-4 h-4" />
+              Recarregar Página
+            </button>
+            {process.env.NODE_ENV !== 'production' && (
+              <pre className="mt-6 p-4 bg-slate-900 text-slate-100 text-left text-xs rounded-xl overflow-auto max-h-40">
+                {String(error)}
+              </pre>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
 }
 
 export default function App() {
@@ -326,7 +376,8 @@ export default function App() {
     }
 
     const simulationId = Math.random().toString(36).substring(2, 9);
-    const newSimulation = {
+    const newSimulation: any = {
+      id: simulationId,
       uid: user.uid,
       name: simulationName,
       clientId: selectedClientId || null,
@@ -375,17 +426,25 @@ export default function App() {
     if (!user) return;
     const formData = new FormData(e.currentTarget);
     const clientId = editingClient?.id || Math.random().toString(36).substring(2, 9);
-    const clientData = {
+    
+    const clientData: any = {
+      id: clientId,
       uid: user.uid,
       name: formData.get('name') as string,
-      email: formData.get('email') as string,
-      phone: formData.get('phone') as string,
       status: formData.get('status') as Client['status'],
       investmentGoal: Number(formData.get('goal')) || 0,
-      notes: formData.get('notes') as string,
       lastContact: new Date().toLocaleDateString('pt-BR'),
       createdAt: editingClient?.createdAt || new Date().toLocaleDateString('pt-BR'),
     };
+
+    const clientEmail = formData.get('email') as string;
+    if (clientEmail) clientData.email = clientEmail;
+
+    const clientPhone = formData.get('phone') as string;
+    if (clientPhone) clientData.phone = clientPhone;
+
+    const clientNotes = formData.get('notes') as string;
+    if (clientNotes) clientData.notes = clientNotes;
 
     try {
       await setDoc(doc(db, 'clients', clientId), clientData);
@@ -411,15 +470,25 @@ export default function App() {
     if (!user) return;
     const formData = new FormData(e.currentTarget);
     const contactId = editingContact?.id || Math.random().toString(36).substring(2, 9);
-    const contactData = {
+    
+    const contactData: any = {
+      id: contactId,
       uid: user.uid,
       name: formData.get('name') as string,
-      email: formData.get('email') as string,
-      phone: formData.get('phone') as string,
-      category: formData.get('category') as string,
-      notes: formData.get('notes') as string,
       createdAt: editingContact?.createdAt || new Date().toLocaleDateString('pt-BR'),
     };
+
+    const contactEmail = formData.get('email') as string;
+    if (contactEmail) contactData.email = contactEmail;
+
+    const contactPhone = formData.get('phone') as string;
+    if (contactPhone) contactData.phone = contactPhone;
+
+    const contactCategory = formData.get('category') as string;
+    if (contactCategory) contactData.category = contactCategory;
+
+    const contactNotes = formData.get('notes') as string;
+    if (contactNotes) contactData.notes = contactNotes;
 
     try {
       await setDoc(doc(db, 'contacts', contactId), contactData);
@@ -662,7 +731,8 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-indigo-100">
+    <ErrorBoundary>
+      <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-indigo-100">
       <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -1287,9 +1357,9 @@ export default function App() {
                     <tbody className="divide-y divide-slate-100">
                       {clients
                         .filter(c => 
-                          c.name.toLowerCase().includes(clientSearch.toLowerCase()) ||
-                          c.email.toLowerCase().includes(clientSearch.toLowerCase()) ||
-                          c.phone?.includes(clientSearch)
+                          (c.name?.toLowerCase() || '').includes(clientSearch.toLowerCase()) ||
+                          (c.email?.toLowerCase() || '').includes(clientSearch.toLowerCase()) ||
+                          (c.phone || '').includes(clientSearch)
                         )
                         .sort((a, b) => {
                           let comparison = 0;
@@ -1414,9 +1484,9 @@ export default function App() {
                         {clients
                           .filter(c => c.status === status)
                           .filter(c => 
-                            c.name.toLowerCase().includes(clientSearch.toLowerCase()) ||
-                            c.email.toLowerCase().includes(clientSearch.toLowerCase()) ||
-                            c.phone?.includes(clientSearch)
+                            (c.name?.toLowerCase() || '').includes(clientSearch.toLowerCase()) ||
+                            (c.email?.toLowerCase() || '').includes(clientSearch.toLowerCase()) ||
+                            (c.phone || '').includes(clientSearch)
                           )
                           .sort((a, b) => {
                             let comparison = 0;
@@ -1535,9 +1605,9 @@ export default function App() {
                   <tbody className="divide-y divide-slate-100">
                     {contacts
                       .filter(c => 
-                        c.name.toLowerCase().includes(contactSearch.toLowerCase()) ||
-                        c.email.toLowerCase().includes(contactSearch.toLowerCase()) ||
-                        c.category.toLowerCase().includes(contactSearch.toLowerCase())
+                        (c.name?.toLowerCase() || '').includes(contactSearch.toLowerCase()) ||
+                        (c.email?.toLowerCase() || '').includes(contactSearch.toLowerCase()) ||
+                        (c.category?.toLowerCase() || '').includes(contactSearch.toLowerCase())
                       )
                       .map((contact) => (
                       <tr key={contact.id} className="hover:bg-slate-50/50 transition-colors group">
@@ -1917,6 +1987,7 @@ export default function App() {
           </div>
         </div>
       </footer>
-    </div>
+      </div>
+    </ErrorBoundary>
   );
 }
