@@ -122,7 +122,8 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     path
   }
   console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  // Not throwing anymore to avoid crashing the app on background sync errors
+  // The UI should handle empty states instead.
 }
 
 interface SavedSimulation {
@@ -201,7 +202,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
               <RefreshCcw className="w-4 h-4" />
               Recarregar Página
             </button>
-            {process.env.NODE_ENV !== 'production' && (
+            {typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production' && (
               <pre className="mt-6 p-4 bg-slate-900 text-slate-100 text-left text-xs rounded-xl overflow-auto max-h-40">
                 {String(error)}
               </pre>
@@ -277,6 +278,14 @@ const getGreeting = () => {
 };
 
 export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppContent />
+    </ErrorBoundary>
+  );
+}
+
+function AppContent() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'simulador' | 'crm' | 'contatos' | 'educacao' | 'sobre'>('dashboard');
@@ -318,31 +327,41 @@ export default function App() {
 
   // Auth Listener
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    let isMounted = true;
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (!isMounted) return;
+      
       setUser(currentUser);
       setIsAuthLoading(false);
+      
       if (currentUser) {
-        // Create/Update user profile in Firestore
-        const userRef = doc(db, 'users', currentUser.uid);
-        const userData: any = {
-          uid: currentUser.uid,
-          email: currentUser.email
-        };
-        
-        // Sanitize: only add fields if they are not null/undefined to avoid Firestore rule rejections
-        // Note: Rules don't explicitly check createdAt, but it's good practice to keep it clean.
-        if (currentUser.displayName) userData.displayName = currentUser.displayName;
-        if (currentUser.photoURL && (currentUser.photoURL.startsWith('http://') || currentUser.photoURL.startsWith('https://'))) {
-          userData.photoURL = currentUser.photoURL;
-        }
+        try {
+          // Create/Update user profile in Firestore
+          const userRef = doc(db, 'users', currentUser.uid);
+          const userData: any = {
+            uid: currentUser.uid,
+            email: currentUser.email
+          };
+          
+          if (currentUser.displayName) userData.displayName = currentUser.displayName;
+          if (currentUser.photoURL && (currentUser.photoURL.startsWith('http') || currentUser.photoURL.startsWith('https'))) {
+            userData.photoURL = currentUser.photoURL;
+          }
 
-        setDoc(userRef, userData, { merge: true }).catch(err => {
-          console.error('Failed to sync user profile:', err);
-          // Don't throw here to avoid crashing the app if just a profile sync fails
-        });
+          // Use silent sync to avoid blocking the UI
+          setDoc(userRef, userData, { merge: true }).catch(err => {
+            console.warn('Profile sync warning (non-fatal):', err);
+          });
+        } catch (err) {
+          console.warn('Profile sync logic error (non-fatal):', err);
+        }
       }
     });
-    return () => unsubscribe();
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, []);
 
   // Firestore Sync - Clients
@@ -390,6 +409,8 @@ export default function App() {
         setError('O pop-up de login foi bloqueado pelo seu navegador.');
       } else if (err.code === 'auth/operation-not-allowed') {
         setError(`O login com Google NÃO está ativado no Firebase para o projeto: ${firebaseConfig.projectId}. Verifique se você ativou o Google E selecionou um "E-mail de suporte" no console.`);
+      } else if (err.code === 'auth/unauthorized-domain') {
+        setError(`Este domínio (${window.location.hostname}) não está autorizado no Firebase. Vá no Console do Firebase > Autenticação > Configurações > Domínios Autorizados e adicione: ${window.location.hostname}`);
       } else {
         setError(`Falha ao entrar com Google: ${err.message || err.code || 'Erro desconhecido'}`);
       }
@@ -827,8 +848,7 @@ export default function App() {
   }
 
   return (
-    <ErrorBoundary>
-      <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-indigo-100">
+    <div key={user?.uid || 'anonymous'} className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-indigo-100">
       <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -2323,6 +2343,5 @@ export default function App() {
         </div>
       </footer>
       </div>
-    </ErrorBoundary>
   );
 }
