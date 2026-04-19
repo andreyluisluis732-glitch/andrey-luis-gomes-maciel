@@ -745,20 +745,29 @@ function AppContent() {
     }
   }, [savedSimulations, clients]);
 
-  if (isAuthLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-slate-500 font-medium">Carregando...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+  return (
+    <AnimatePresence mode="wait">
+      {isAuthLoading ? (
+        <motion.div 
+          key="loading"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="min-h-screen flex items-center justify-center bg-slate-50"
+        >
+          <div className="flex flex-col items-center gap-4">
+            <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+            <p className="text-slate-500 font-medium font-sans">Carregando...</p>
+          </div>
+        </motion.div>
+      ) : !user ? (
+        <motion.div 
+          key="auth"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="min-h-screen flex items-center justify-center bg-slate-50 p-4"
+        >
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -769,12 +778,14 @@ function AppContent() {
               <TrendingUp className="w-8 h-8" />
             </div>
             <h2 className="text-3xl font-bold text-slate-800 mb-2">
-              {authMode === 'signin' ? 'Bem-vindo!' : 'Crie sua conta'}
+              <span>{authMode === 'signin' ? 'Bem-vindo!' : 'Crie sua conta'}</span>
             </h2>
             <p className="text-slate-500">
-              {authMode === 'signin' 
-                ? 'Faça login para salvar suas simulações e gerenciar seus clientes.' 
-                : 'Comece a gerenciar suas finanças e clientes hoje mesmo.'}
+              <span>
+                {authMode === 'signin' 
+                  ? 'Faça login para salvar suas simulações e gerenciar seus clientes.' 
+                  : 'Comece a gerenciar suas finanças e clientes hoje mesmo.'}
+              </span>
             </p>
           </div>
 
@@ -817,7 +828,7 @@ function AppContent() {
               ) : (
                 <>
                   <LogIn className="w-5 h-5" />
-                  {authMode === 'signin' ? 'Entrar' : 'Cadastrar'}
+                  <span>{authMode === 'signin' ? 'Entrar' : 'Cadastrar'}</span>
                 </>
               )}
             </button>
@@ -855,21 +866,23 @@ function AppContent() {
           </button>
 
           <p className="text-center text-sm text-slate-500">
-            {authMode === 'signin' ? 'Não tem uma conta?' : 'Já tem uma conta?'}
+            <span>{authMode === 'signin' ? 'Não tem uma conta?' : 'Já tem uma conta?'}</span>
             <button 
               onClick={() => setAuthMode(authMode === 'signin' ? 'signup' : 'signin')}
               className="ml-2 text-indigo-600 font-bold hover:underline"
             >
-              {authMode === 'signin' ? 'Cadastre-se' : 'Faça login'}
+              <span>{authMode === 'signin' ? 'Cadastre-se' : 'Faça login'}</span>
             </button>
           </p>
+          </motion.div>
         </motion.div>
-      </div>
-    );
-  }
-
-  return (
-    <div key={user?.uid || 'anonymous'} className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-indigo-100">
+      ) : (
+        <motion.div 
+          key="main"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-indigo-100"
+        >
       <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -991,7 +1004,7 @@ function AppContent() {
             <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
-                  {getGreeting()}, {user?.displayName?.split(' ')[0] || 'Investidor'}!
+                  <span>{getGreeting()}</span>, <span>{user?.displayName?.split(' ')[0] || 'Investidor'}</span>!
                 </h1>
                 <p className="text-slate-500 mt-1">Aqui está o resumo das suas operações e metas.</p>
               </div>
@@ -1017,8 +1030,8 @@ function AppContent() {
                   <span className="text-[10px] font-bold text-emerald-500 bg-emerald-50 px-2.5 py-1 rounded-lg uppercase tracking-tight">+12.5%</span>
                 </div>
                 <h3 className="text-slate-400 text-xs font-bold uppercase tracking-widest">Patrimônio Gerido</h3>
-                <p className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">
-                  {formatCurrency(dashboardStats.totalAumSimulated)}
+                <p className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight notranslate">
+                  <span>{formatCurrency(dashboardStats.totalAumSimulated)}</span>
                 </p>
               </motion.div>
 
@@ -1035,7 +1048,9 @@ function AppContent() {
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{clients.length} Total</span>
                 </div>
                 <h3 className="text-slate-400 text-xs font-bold uppercase tracking-widest">Clientes Ativos</h3>
-                <p className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">{dashboardStats.activeClients}</p>
+                <p className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight notranslate">
+                  <span>{dashboardStats.activeClients}</span>
+                </p>
               </motion.div>
 
               <motion.div 
@@ -1051,7 +1066,9 @@ function AppContent() {
                   <span className="text-[10px] font-bold text-amber-500 bg-amber-50 px-2.5 py-1 rounded-lg uppercase tracking-tight">Pendente</span>
                 </div>
                 <h3 className="text-slate-400 text-xs font-bold uppercase tracking-widest">Leads em Proposta</h3>
-                <p className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">{dashboardStats.opportunityCount}</p>
+                <p className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight notranslate">
+                  <span>{dashboardStats.opportunityCount}</span>
+                </p>
               </motion.div>
 
               <motion.div 
@@ -1067,7 +1084,9 @@ function AppContent() {
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Cenários</span>
                 </div>
                 <h3 className="text-slate-400 text-xs font-bold uppercase tracking-widest">Total Simulado</h3>
-                <p className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">{dashboardStats.simulationCount}</p>
+                <p className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight notranslate">
+                  <span>{dashboardStats.simulationCount}</span>
+                </p>
               </motion.div>
             </div>
 
@@ -2363,6 +2382,8 @@ function AppContent() {
           </div>
         </div>
       </footer>
-      </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
